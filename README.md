@@ -4,11 +4,12 @@ A backend AI application that automatically classifies images, generates structu
 ## Features
 * Image classification with a vision model (pluggable Claude / Gemini providers, plus an offline mock provider for testing)
 * Structured image tags (subject, category, attributes, caption, confidence)
-* Semantic matching between images and blog posts
-* Mismatch guard using similarity thresholds and tag validation
+* Semantic matching between images and blog posts (TF-IDF + SVD by default, with a pluggable sentence-transformer provider for dense semantic embeddings)
+* Mismatch guard: similarity threshold + explicit subject-agreement check (extracts the post's target subject and verifies image tags actually agree with it, not just generic keyword overlap)
 * Batch classification pipeline with retries, rate limiting, and per-image failure isolation
-* Protected review interface (Approve/Reject)
-* Cost tracking for vision model calls
+* Real multipart image upload endpoint plus path-based registration for local seeding
+* Review interface (Approve/Reject) — ⚠️ verify Supabase auth is actually applied to these routes before calling this "protected"
+* Cost tracking for vision and embedding calls
 
 ## Tech Stack
 * Python
@@ -16,7 +17,7 @@ A backend AI application that automatically classifies images, generates structu
 * SQLModel + SQLite
 * Supabase Authentication
 * Claude / Gemini Vision API (pluggable providers, with a mock offline provider for testing)
-* NumPy & scikit-learn 
+* NumPy & scikit-learn (TF-IDF + TruncatedSVD embeddings, with a pluggable `sentence-transformers` provider for dense semantic embeddings)
 
 ## Setup
 1. Clone the repository.
