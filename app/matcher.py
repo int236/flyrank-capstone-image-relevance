@@ -22,12 +22,7 @@ from .cost import record_cost
 from .embeddings import EmbeddingProvider, cosine_similarity, upsert_embedding
 from .models import ClassificationStatus, Image, ImageTag, OwnerType, Post
 
-SIMILARITY_THRESHOLD = 0.08  # tuned for TF-IDF's small score range.
-# IMPORTANT: if you're using SentenceTransformerEmbeddingProvider (dense semantic
-# vectors), this threshold is too low - those models score much higher even for
-# loosely related text. Re-tune empirically: start around 0.35-0.45 and adjust
-# based on what your actual posts/images score.
-
+SIMILARITY_THRESHOLD = 0.5
 
 @dataclass
 class Candidate:
@@ -43,13 +38,11 @@ class Candidate:
 def _tokenize(text: str) -> set[str]:
     return set(re.findall(r"[a-z]+", text.lower()))
 
-
 def _subject_tokens(subject: str) -> set[str]:
     # drop generic qualifiers so "gray wolf" and "wolf" and "domestic dog" and "dog" all key
     # off their most specific noun(s)
     stop = {"domestic", "gray", "grey", "wild", "young", "adult", "unknown"}
     return {t for t in _tokenize(subject) if t not in stop}
-
 
 def extract_target_subject(post_text: str, known_subjects: list[str]) -> str | None:
     """Find which known tag vocabulary the post is actually about, by literal
@@ -127,7 +120,6 @@ def rank_images_for_post(session: Session, post: Post, embedder: EmbeddingProvid
 
     candidates.sort(key=lambda c: c.similarity, reverse=True)
     return candidates
-
 
 def best_pairing_for_post(session: Session, post: Post, embedder: EmbeddingProvider,
                            threshold: float = SIMILARITY_THRESHOLD) -> Candidate | None:
