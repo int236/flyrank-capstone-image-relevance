@@ -15,7 +15,7 @@ A backend AI application that automatically classifies images, generates structu
 * SQLModel + SQLite
 * Supabase Authentication
 * LlamaParse / Vision Model
-* NumPy & scikit-learn (TF-IDF embeddings)
+* NumPy & scikit-learn 
 
 ## Setup
 1. Clone the repository.
