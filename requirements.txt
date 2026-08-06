@@ -1,0 +1,10 @@
+anthropic
+fastapi
+httpx
+numpy
+pydantic
+pytest
+scikit-learn
+sqlmodel
+google-genai
+uvicorn[standard]
