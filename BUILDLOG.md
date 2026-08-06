@@ -81,7 +81,7 @@ There's also a third path: **low-confidence tags don't get auto-blocked.** If a 
 
 `best_pairing_for_post()` walks the ranked candidates and returns the first one that actually made it to `"suggested"` — or `None` if nothing did, covering the "no good image for this post" case explicitly rather than silently returning a low-quality match.
 
-## Day 6 — Batch Classification, Review Interface & Auth
+## Day 6 — API Surface, Batch Classification & Review Interface
 
 Built `batch.py` — `run_classification_batch()` iterates every `Image` missing an `ImageTag` (or a given `image_ids` subset), classifies each via `classify_with_retries`, and never lets one failure kill the run: failed images get an `ImageTag` with `status=error` instead of crashing the batch.
 
@@ -90,16 +90,21 @@ Details worth logging:
 - `force=True` mode wipes existing tags and reclassifies — built for provider migration (e.g. mock → real vision model).
 - Concurrent-run safety: if two batch jobs somehow tag the same image, the resulting `IntegrityError` is caught and treated as a no-op skip, not a crash.
 
-Built the review endpoint set:
-- `GET /suggestions?status=pending`
-- `POST /suggestions/{id}/approve`
-- `POST /suggestions/{id}/reject`
+Wired up the full FastAPI surface in `api.py`:
+- `POST /images` — register an image already on disk by path (used by local seed scripts like `load_data.py`).
+- `POST /images/upload` — real multipart file upload: validates extension, saves bytes to disk under a UUID filename, registers the resulting path. This is the actual bulk/proper ingestion path for client-submitted files.
+- `POST /posts` — create a post.
+- `POST /batch/classify` — triggers `run_classification_batch`. Provider is auto-selected by `_select_vision_provider()`: Gemini (free tier) if `GEMINI_API_KEY` is set, else Claude if `ANTHROPIC_API_KEY` is set, else falls back to the mock provider. Going live is an env var change, not a code change.
+- `GET /posts/{id}/images` — ranks candidates via `rank_images_for_post()` **and persists them** as `Pairing` rows (upserted on `post_id`+`image_id`). This is what actually populates the review queue — ranking and persistence aren't separate steps.
+- `POST /pairings/{id}/approve` / `POST /pairings/{id}/reject` — human review actions. Both are guarded: a `guard_blocked` pairing can't be approved (409), and an already-reviewed pairing can't be re-reviewed (409).
+- `GET /review` — a plain server-rendered HTML table (not a JS frontend) with inline approve/reject `<form>` buttons, color-coded by verdict.
+- `GET /cost` — running total from the shared cost ledger.
 
-Wired up Supabase Authentication so only logged-in reviewers can hit these endpoints — added a dependency that validates the Supabase JWT on protected routes.
+**Correction on the embedding provider:** the singleton built in `_get_embedder_instance()` hardcodes `SentenceTransformerEmbeddingProvider`, not TF-IDF — so the live API is running the neural embedding model (`all-MiniLM-L6-v2`), cached once per process since loading it is slow. `TfidfEmbeddingProvider` exists and is fully functional but isn't wired into any live code path right now.
 
-Manually tested the full loop: register images → batch classify → rank against a post → review queue → approve/reject → status updates in DB.
+This matters directly for `SIMILARITY_THRESHOLD` in `matcher.py`. The code comment there says the threshold (`0.08`) is tuned for TF-IDF's compressed score range — but since the API is actually running the sentence-transformer, that threshold is very likely too low for what's actually live. Needs empirical re-tuning (test against known-correct vs. known-incorrect pairs and find where they separate) rather than trusting the old TF-IDF-tuned value.
 
-**Note:** image *registration* currently happens via a plain client script (`load_data.py`) calling `POST /images` and `POST /posts` one at a time — there's no bulk/multi-file ingestion endpoint yet. That's a real gap, tracked in the backlog below (see correction).
+Manually tested the full loop: upload/register images → batch classify → rank + persist against a post → review queue → approve/reject → status updates in DB.
 
 ## Day 7 — Cost Tracking & Polish
 
@@ -113,7 +118,8 @@ Final smoke test: ran the full pipeline against a small sample of images and pos
 
 ## Next Steps (Backlog)
 
-- Swap `TfidfEmbeddingProvider` for `SentenceTransformerEmbeddingProvider` in production and re-tune the similarity threshold (~0.35–0.45) accordingly — the code path already exists, this is a config change plus threshold retuning, not new development.
-- **Add a real batch upload endpoint for bulk image ingestion** (`POST /images/batch`, multipart or JSON list) — still open. `batch.py` only handles bulk *classification* of already-registered images; registration itself is still one-at-a-time via a local script (`load_data.py`), not a documented, auth-protected API endpoint.
+- **Re-tune `SIMILARITY_THRESHOLD`.** The live API runs `SentenceTransformerEmbeddingProvider`, but the threshold in `matcher.py` (`0.08`) is still tuned for TF-IDF's score range. This is the highest-priority open item — the mismatch guard's first check may currently be too permissive for what's actually deployed. Needs empirical testing against real post/image pairs to find the right cutoff (~0.35–0.45 as a starting point, per the code comment).
+- ~~Add a batch upload endpoint for bulk image ingestion~~ ✅ done — `POST /images/upload` handles real multipart file upload; `POST /images` + `load_data.py` remain a valid separate path for registering images already on disk locally.
+- Confirm whether `GET /review` and the pairing approve/reject endpoints are actually behind Supabase auth — no auth dependency is visible on those routes in `api.py`; the README currently claims a "protected review interface."
 - Add pagination + filtering to the review interface.
 - Add webhook/notification when a new match needs review.
